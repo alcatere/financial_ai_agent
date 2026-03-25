@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
 from src.models.schemas import FinancialRecommendation
 from src.tools.market_data import get_market_data
 from src.tools.fundamentals import get_fundamental_data
@@ -59,6 +60,8 @@ def analyze_asset(ticker: str) -> FinancialRecommendation:
     print(f"[*] Fetching recent news for {ticker}...")
     news_data = get_recent_news(ticker)
 
+    parser = PydanticOutputParser(pydantic_object=FinancialRecommendation)
+
     prompt = ChatPromptTemplate.from_messages([
         ("system", SYSTEM_PROMPT),
         ("human", "Analyze the following asset and provide your strict recommendation based on the current data.\n\n"
@@ -66,21 +69,20 @@ def analyze_asset(ticker: str) -> FinancialRecommendation:
                   "Market Data: {market_data}\n"
                   "Fundamental Data: {fundamental_data}\n"
                   "Recent News: {news_data}\n\n"
-                  "Output strictly matching the requested JSON format.")
+                  "{format_instructions}")
     ])
 
     llm = get_llm()
-    # Ensure structured output
-    structured_llm = llm.with_structured_output(FinancialRecommendation)
-    
-    chain = prompt | structured_llm
+    # Explicitly parsing the output to ensure the schema is strictly followed
+    chain = prompt | llm | parser
     
     print(f"[*] Analyzing data securely with AI...")
     result = chain.invoke({
         "ticker": ticker,
         "market_data": json.dumps(market_data),
         "fundamental_data": json.dumps(fundamental_data),
-        "news_data": json.dumps(news_data)
+        "news_data": json.dumps(news_data),
+        "format_instructions": parser.get_format_instructions()
     })
     
     return result
