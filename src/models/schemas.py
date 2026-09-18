@@ -12,5 +12,8 @@ class FinancialRecommendation(BaseModel):
     confidence: int = Field(ge=0, le=100, description="Confidence level as a percentage (0-100%).")
     rationale: Rationale = Field(description="Detailed reasoning broken down into technical, fundamental, and sentiment factors.")
     risks: str = Field(description="Potential risks associated with this recommendation.")
+    suggested_allocation_pct: float = Field(
+        ge=0, le=5, description="Suggested position size as a percentage of portfolio (0-5, never above 5)."
+    )
     suggested_position_size: str = Field(description="Suggested position size (e.g., 'maximum 2% of portfolio').")
     action: str = Field(description="Explain whether to execute trade or wait based on confidence and risk management rules.")

@@ -17,3 +17,9 @@ __pycache__/
 
 # OS specific
 .DS_Store
+
+# Local trading state (orders DB, Telegram polling offset)
+data/
+
+# Local Claude Code settings
+.claude/
