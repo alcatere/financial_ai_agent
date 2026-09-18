@@ -1,0 +1,22 @@
+[project]
+name = "financial-ai-agent"
+version = "0.2.0"
+description = "AI-powered financial analysis agent with risk-managed order execution via Interactive Brokers"
+requires-python = ">=3.10"
+dependencies = [
+    "langchain-core>=1.2",
+    "langchain-openai>=1.1",
+    "yfinance>=1.2",
+    "pandas>=2.2",
+    "pydantic>=2.9",
+    "python-dotenv>=1.0",
+    "requests>=2.32",
+    "ib_async>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

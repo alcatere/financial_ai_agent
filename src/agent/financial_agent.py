@@ -1,15 +1,22 @@
-import os
-from dotenv import load_dotenv
+from dataclasses import dataclass
+from typing import Any, Dict, List
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
+from src.config import Config
 from src.models.schemas import FinancialRecommendation
 from src.tools.market_data import get_market_data
 from src.tools.fundamentals import get_fundamental_data
 from src.tools.sentiment import get_recent_news
 import json
 
-load_dotenv()
+
+@dataclass
+class AnalysisResult:
+    recommendation: FinancialRecommendation
+    market_data: Dict[str, Any]
+    fundamental_data: Dict[str, Any]
+    news_data: List[Dict[str, str]]
 
 SYSTEM_PROMPT = """
 You are an AI-powered financial analysis and trading assistant designed to support investment decisions in equity markets.
@@ -35,21 +42,17 @@ RISK MANAGEMENT RULES (STRICT)
 - Never hallucinate financial data. If data is missing (e.g. 'N/A'), explicitly state it and prefer 'no action'.
 """
 
-def get_llm():
+def get_llm(config: Config):
     # We use ChatOpenAI connected to OpenRouter for Anthropic models
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        raise ValueError("OPENROUTER_API_KEY environment variable not set")
-    
     return ChatOpenAI(
-        model=os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet"),
-        openai_api_key=api_key,
+        model=config.openrouter_model,
+        openai_api_key=config.openrouter_api_key,
         openai_api_base="https://openrouter.ai/api/v1",
         max_tokens=1000,
         temperature=0.1 # Low temperature for accurate analysis
     )
 
-def analyze_asset(ticker: str) -> FinancialRecommendation:
+def analyze_asset(ticker: str, config: Config) -> AnalysisResult:
     """End-to-end pipeline: Fetch data -> Prompt LLM -> Parse Output"""
     print(f"[*] Fetching market data for {ticker}...")
     market_data = get_market_data(ticker)
@@ -72,7 +75,7 @@ def analyze_asset(ticker: str) -> FinancialRecommendation:
                   "{format_instructions}")
     ])
 
-    llm = get_llm()
+    llm = get_llm(config)
     # Explicitly parsing the output to ensure the schema is strictly followed
     chain = prompt | llm | parser
     
@@ -85,4 +88,9 @@ def analyze_asset(ticker: str) -> FinancialRecommendation:
         "format_instructions": parser.get_format_instructions()
     })
     
-    return result
+    return AnalysisResult(
+        recommendation=result,
+        market_data=market_data,
+        fundamental_data=fundamental_data,
+        news_data=news_data,
+    )

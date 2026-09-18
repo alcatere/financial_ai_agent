@@ -1,38 +1,45 @@
 import argparse
 import sys
-from src.agent.financial_agent import analyze_asset
-import json
+
+from src.config import load_config
+
+
+def cmd_analyze(args):
+    from src.pipeline import run_analysis
+    config = load_config()
+    print(f"--- Running in {config.mode_label} mode, execution={config.execution_mode} ---")
+    run_analysis(args.ticker.upper(), config)
+
+
+def cmd_check_confirmations(args):
+    from src.pipeline import run_check_confirmations
+    config = load_config()
+    print(f"--- Checking Telegram confirmations ({config.mode_label} mode) ---")
+    run_check_confirmations(config)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Financial AI Agent CLI")
-    parser.add_argument("--ticker", required=True, help="The stock ticker symbol to analyze (e.g., AAPL)")
-    
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    analyze_parser = subparsers.add_parser("analyze", help="Analyze a ticker and propose/execute an order")
+    analyze_parser.add_argument("--ticker", required=True, help="The stock ticker symbol to analyze (e.g., AAPL)")
+    analyze_parser.set_defaults(func=cmd_analyze)
+
+    check_parser = subparsers.add_parser("check-confirmations", help="Poll Telegram for order confirmations and execute them")
+    check_parser.set_defaults(func=cmd_check_confirmations)
+
     args = parser.parse_args()
-    ticker = args.ticker.upper()
-    
-    print(f"--- Triggering Financial AI Agent for {ticker} ---")
+
     try:
-        recommendation = analyze_asset(ticker)
-        
-        print("\n--- Final Recommendation ---")
-        # Format the Pydantic model response beautifully
-        print(f"Action: {recommendation.recommendation}")
-        print(f"Asset: {recommendation.asset}")
-        print(f"Confidence: {recommendation.confidence}%")
-        print("\nRationale:")
-        print(f"  Technical: {recommendation.rationale.technical_factors}")
-        print(f"  Fundamental: {recommendation.rationale.fundamental_factors}")
-        print(f"  Sentiment: {recommendation.rationale.sentiment_factors}")
-        print(f"\nRisks: {recommendation.risks}")
-        print(f"Suggested Position Size: {recommendation.suggested_position_size}")
-        print(f"Execution Strategy: {recommendation.action}")
-        
+        args.func(args)
     except ValueError as ve:
         print(f"\n[Error] Configuration Issue: {ve}")
         sys.exit(1)
     except Exception as e:
-        print(f"\n[Error] Failed to process recommendation: {str(e)}")
+        print(f"\n[Error] Failed to process request: {str(e)}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
