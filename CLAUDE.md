@@ -4,7 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An AI agent that analyzes stocks (market/fundamental/news data via `yfinance` + an LLM via OpenRouter) and turns the analysis into risk-managed trading orders, executed through **Interactive Brokers** (not GBM — GBM has no official API; see README.md "Why Interactive Brokers, not GBM"). Real money is never touched without a deliberate, explicit config change (`TRADING_MODE=live`); everything defaults to IBKR's paper-trading account.
+An AI agent that analyzes stocks (market/fundamental/news data via `yfinance` + an LLM via OpenRouter). Two modes share the same analysis core (`analyze_asset` in `src/agent/financial_agent.py`) but diverge after that:
+
+- **`daily-digest` (current, default mode)**: purely advisory. Analyzes `config.watchlist` once a day and sends one Telegram message with a verdict per ticker (buy/sell/stay put). Never touches a broker. The user executes manually in GBM.
+- **`analyze` / `check-confirmations` (dormant "phase 2")**: full order-execution path targeting **Interactive Brokers** (not GBM — GBM has no official API; see README.md "Phase 2"). Built and tested, but not what `daily-digest` uses. Real money is never touched without an explicit `TRADING_MODE=live` change; everything defaults to IBKR's paper account.
+
+When asked to change trading logic, check which mode the change is actually for — `RiskManager.evaluate_signal()` (signal quality only) backs the digest, `RiskManager.evaluate()` (signal quality + allocation/trade-limit) backs execution.
 
 ## Commands
 
@@ -19,10 +24,15 @@ pytest -v
 # Run a single test
 pytest tests/test_risk_manager.py::test_hold_is_never_approved -v
 
-# Run the app (two-step flow, see Architecture below)
+# Run the current advisory digest (analyzes config.watchlist, sends one Telegram message)
+python main.py daily-digest
+
+# Dormant phase-2 execution flow (see Architecture below) — not used by daily-digest
 python main.py analyze --ticker AAPL
 python main.py check-confirmations
 ```
+
+`daily-digest` is scheduled via a macOS `launchd` user agent (template at `launchd/com.financialaiagent.dailydigest.plist`, installed to `~/Library/LaunchAgents/`) firing at 7:00 AM local time — not cron. `launchctl list | grep financialaiagent` shows it; logs go to `~/Library/Logs/financial-ai-agent-digest.log`.
 
 There is no lint/format tooling configured in this repo (no ruff/black/mypy config) — don't assume one and invent commands for it.
 
@@ -31,7 +41,9 @@ Most tests (`tests/test_risk_manager.py`, `tests/test_order_store.py`, `tests/te
 ## Architecture
 
 ### The core pipeline (`src/pipeline.py`)
-`run_analysis(ticker, config)` is the spine of the whole system, run in this order:
+`run_daily_digest(config)` is the current entry point: for each ticker in `config.watchlist`, calls `analyze_asset()` then `RiskManager.evaluate_signal()`, formats one line per ticker with the pure, unit-tested `format_digest_line()`, and sends a single digest via `notify_safely`. One ticker's analysis failing (data fetch, LLM error) is caught per-ticker and shown as its own line — it must never abort the rest of the digest.
+
+`run_analysis(ticker, config)` is the dormant phase-2 execution spine, run in this order:
 1. `analyze_asset()` (`src/agent/financial_agent.py`) fetches market/fundamental/news data and asks the LLM for a `FinancialRecommendation` (strict Pydantic schema via `PydanticOutputParser`), returned wrapped in an `AnalysisResult` that also carries the raw tool data.
 2. `RiskManager.evaluate()` (`src/risk/risk_manager.py`) **re-checks the LLM's output in plain Python** — confidence ≥ threshold, allocation clamped to a hard cap (the schema itself already caps `suggested_allocation_pct` at 5%, but `RiskManager` can enforce an even stricter configured cap), missing/errored tool data blocks the trade, daily trade-count limit. This exists because the LLM's system prompt asking it to follow risk rules is not an enforcement mechanism — treat the LLM's own claims about risk as untrusted, and don't add "trust the model" shortcuts here.
 3. If approved, order size (whole shares) is computed from live account equity (`Broker.get_account_equity()`) and current price.

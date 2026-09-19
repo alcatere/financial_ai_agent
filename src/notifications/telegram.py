@@ -9,6 +9,18 @@ CONFIRM_RE = re.compile(r"^/confirm[_ ](\d+)$", re.IGNORECASE)
 REJECT_RE = re.compile(r"^/reject[_ ](\d+)$", re.IGNORECASE)
 
 
+def escape_markdown(text: str) -> str:
+    """Escapes Telegram legacy-Markdown special characters (_ * ` [) in
+    free-form text - notably LLM-generated rationale - before it's
+    interpolated into a message that also uses literal Markdown (*bold*).
+    Without this, a stray '_' or '*' in the model's own wording breaks
+    Telegram's parser and the whole message fails to send.
+    """
+    for ch in ("_", "*", "`", "["):
+        text = text.replace(ch, "\\" + ch)
+    return text
+
+
 def notify_safely(notifier: "TelegramNotifier", text: str) -> None:
     """send_message that never raises.
 

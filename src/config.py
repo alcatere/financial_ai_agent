@@ -1,11 +1,13 @@
 import os
 from dataclasses import dataclass
+from typing import List
 from dotenv import load_dotenv
 
 load_dotenv()
 
 PAPER_PORT = 4002
 LIVE_PORT = 4001
+DEFAULT_WATCHLIST = ["AAPL", "MSFT", "WALMEX.MX", "GFNORTEO.MX", "AMXL.MX"]
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,7 @@ class Config:
     telegram_bot_token: str
     telegram_chat_id: str
     orders_db_path: str
+    watchlist: List[str]
 
     @property
     def is_live(self) -> bool:
@@ -47,6 +50,13 @@ def load_config() -> Config:
     default_port = LIVE_PORT if trading_mode == "live" else PAPER_PORT
     client_id = int(os.getenv("IBKR_CLIENT_ID", "1"))
 
+    watchlist_raw = os.getenv("WATCHLIST", "")
+    parsed_watchlist = [t.strip().upper() for t in watchlist_raw.split(",") if t.strip()]
+    # Falls back to the default for both an unset WATCHLIST and one that's
+    # present but empty/whitespace-only after parsing - either way there's
+    # nothing to scan, so silently running with zero tickers would be worse.
+    watchlist = parsed_watchlist if parsed_watchlist else list(DEFAULT_WATCHLIST)
+
     config = Config(
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
         openrouter_model=os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet"),
@@ -65,6 +75,7 @@ def load_config() -> Config:
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
         orders_db_path=os.getenv("ORDERS_DB_PATH", "data/orders.db"),
+        watchlist=watchlist,
     )
 
     if not config.openrouter_api_key:

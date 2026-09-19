@@ -1,5 +1,5 @@
 import pytest
-from src.config import load_config
+from src.config import DEFAULT_WATCHLIST, load_config
 
 REQUIRED_ENV = {
     "OPENROUTER_API_KEY": "test-key",
@@ -62,3 +62,28 @@ def test_missing_telegram_config_raises(monkeypatch):
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     with pytest.raises(ValueError, match="TELEGRAM"):
         load_config()
+
+
+def test_watchlist_defaults_when_unset(monkeypatch):
+    set_env(monkeypatch)
+    monkeypatch.delenv("WATCHLIST", raising=False)
+    config = load_config()
+    assert config.watchlist == DEFAULT_WATCHLIST
+
+
+def test_watchlist_parses_comma_separated_list(monkeypatch):
+    set_env(monkeypatch, WATCHLIST="aapl, msft , walmex.mx")
+    config = load_config()
+    assert config.watchlist == ["AAPL", "MSFT", "WALMEX.MX"]
+
+
+def test_watchlist_ignores_empty_entries(monkeypatch):
+    set_env(monkeypatch, WATCHLIST="aapl,,msft,")
+    config = load_config()
+    assert config.watchlist == ["AAPL", "MSFT"]
+
+
+def test_watchlist_whitespace_only_falls_back_to_default(monkeypatch):
+    set_env(monkeypatch, WATCHLIST="   ")
+    config = load_config()
+    assert config.watchlist == DEFAULT_WATCHLIST

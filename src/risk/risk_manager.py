@@ -35,37 +35,44 @@ class RiskManager:
         self.min_confidence = min_confidence
         self.max_daily_trades = max_daily_trades
 
-    def evaluate(
+    def evaluate_signal(
         self,
         recommendation: FinancialRecommendation,
         market_data: Dict[str, Any],
         fundamental_data: Dict[str, Any],
-        trades_today: int,
     ) -> RiskDecision:
+        """Is this recommendation trustworthy enough to act on at all?
+
+        Covers only signal quality (HOLD / confidence / data availability) -
+        nothing about sizing or trade-frequency, so callers with no order to
+        place (e.g. an advisory digest) can use this without an OrderStore or
+        a trades-today count. `evaluate()` builds on top of this for the
+        execution path.
+        """
         # Reasons are tracked in two buckets rather than inferred from message
         # text, so a later wording change can never silently flip whether a
         # reason blocks the trade.
         blocking_reasons: List[str] = []
         info_reasons: List[str] = []
 
-        if recommendation.recommendation == "HOLD":
-            blocking_reasons.append("Recommendation is HOLD; no order to place.")
-            return RiskDecision(approved=False, allocation_pct=0.0, reasons=blocking_reasons)
-
+        # Data-quality checks run before the HOLD short-circuit, not after,
+        # so a HOLD caused by missing data (the system prompt tells the LLM
+        # to prefer HOLD when data is missing) still carries that reason -
+        # callers must be able to tell "genuinely stable" apart from "we had
+        # no real data on this ticker today".
         if "error" in market_data:
             blocking_reasons.append(f"Market data unavailable: {market_data['error']}")
         if "error" in fundamental_data:
             blocking_reasons.append(f"Fundamental data unavailable: {fundamental_data['error']}")
 
+        if recommendation.recommendation == "HOLD":
+            blocking_reasons.append("Recommendation is HOLD; no order to place.")
+            return RiskDecision(approved=False, allocation_pct=0.0, reasons=blocking_reasons)
+
         if recommendation.confidence < self.min_confidence:
             blocking_reasons.append(
                 f"Confidence {recommendation.confidence}% is below the "
                 f"{self.min_confidence}% minimum required to execute."
-            )
-
-        if trades_today >= self.max_daily_trades:
-            blocking_reasons.append(
-                f"Daily trade limit reached ({trades_today}/{self.max_daily_trades})."
             )
 
         # The Pydantic schema already hard-caps suggested_allocation_pct at 5%,
@@ -85,6 +92,27 @@ class RiskManager:
             allocation_pct=allocation_pct,
             reasons=blocking_reasons + info_reasons,
         )
+
+    def evaluate(
+        self,
+        recommendation: FinancialRecommendation,
+        market_data: Dict[str, Any],
+        fundamental_data: Dict[str, Any],
+        trades_today: int,
+    ) -> RiskDecision:
+        """Signal quality plus execution throttling (daily trade limit)."""
+        decision = self.evaluate_signal(recommendation, market_data, fundamental_data)
+
+        if recommendation.recommendation == "HOLD":
+            return decision
+
+        if trades_today >= self.max_daily_trades:
+            reasons = decision.reasons + [
+                f"Daily trade limit reached ({trades_today}/{self.max_daily_trades})."
+            ]
+            return RiskDecision(approved=False, allocation_pct=decision.allocation_pct, reasons=reasons)
+
+        return decision
 
     def size_order(self, allocation_pct: float, account_equity: float, price: float) -> int:
         """Whole-share quantity for the given allocation percentage."""

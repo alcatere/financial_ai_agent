@@ -43,13 +43,16 @@ RISK MANAGEMENT RULES (STRICT)
 """
 
 def get_llm(config: Config):
-    # We use ChatOpenAI connected to OpenRouter for Anthropic models
+    # We use ChatOpenAI connected to OpenRouter for Anthropic models.
+    # timeout bounds a hung request at the source, rather than relying solely
+    # on the caller-side thread timeout in src/pipeline.py's daily digest.
     return ChatOpenAI(
         model=config.openrouter_model,
         openai_api_key=config.openrouter_api_key,
         openai_api_base="https://openrouter.ai/api/v1",
         max_tokens=1000,
-        temperature=0.1 # Low temperature for accurate analysis
+        temperature=0.1, # Low temperature for accurate analysis
+        timeout=60,
     )
 
 def analyze_asset(ticker: str, config: Config) -> AnalysisResult:
