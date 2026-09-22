@@ -2,7 +2,7 @@ import threading
 from datetime import date
 from typing import Optional
 
-from src.agent.financial_agent import analyze_asset
+from src.agent.financial_agent import analyze_asset, llm_unreachable_reason
 from src.broker.ibkr import IBKRBroker
 from src.config import Config
 from src.models.schemas import FinancialRecommendation
@@ -28,6 +28,10 @@ def run_analysis(ticker: str, config: Config) -> None:
     expired = store.expire_stale(config.pending_order_ttl_minutes)
     if expired:
         print(f"[*] Expired {expired} stale pending order(s).")
+
+    unreachable = llm_unreachable_reason(config)
+    if unreachable:
+        raise RuntimeError(unreachable)
 
     print(f"[*] Analyzing {ticker}...")
     analysis = analyze_asset(ticker, config)
@@ -253,7 +257,6 @@ def format_digest_line(
     return f"➡️ *{ticker_display}*: sin acción clara ({reasons})"
 
 
-TICKER_ANALYSIS_TIMEOUT_SECONDS = 90
 TELEGRAM_MESSAGE_SOFT_LIMIT = 3800  # margin under Telegram's 4096-char hard limit
 
 
@@ -329,11 +332,21 @@ def run_daily_digest(config: Config) -> None:
         max_allocation_pct=config.max_allocation_pct, min_confidence=config.min_confidence
     )
 
+    unreachable = llm_unreachable_reason(config)
+    if unreachable:
+        print(f"[!] {unreachable}")
+        notify_safely(
+            notifier,
+            f"*Resumen diario — {date.today().isoformat()}*\n\n"
+            f"⚠️ No se pudo generar el análisis de hoy.\n{escape_markdown(unreachable)}",
+        )
+        return
+
     lines = []
     for ticker in config.watchlist:
         try:
             print(f"[*] Analyzing {ticker}...")
-            analysis = _analyze_with_timeout(ticker, config, TICKER_ANALYSIS_TIMEOUT_SECONDS)
+            analysis = _analyze_with_timeout(ticker, config, config.analysis_timeout_seconds)
             decision = risk_manager.evaluate_signal(
                 analysis.recommendation, analysis.market_data, analysis.fundamental_data
             )

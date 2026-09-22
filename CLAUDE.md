@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An AI agent that analyzes stocks (market/fundamental/news data via `yfinance` + an LLM via OpenRouter). Two modes share the same analysis core (`analyze_asset` in `src/agent/financial_agent.py`) but diverge after that:
+An AI agent that analyzes stocks (market/fundamental/news data via `yfinance` + an LLM). Two modes share the same analysis core (`analyze_asset` in `src/agent/financial_agent.py`) but diverge after that:
 
 - **`daily-digest` (current, default mode)**: purely advisory. Analyzes `config.watchlist` once a day and sends one Telegram message with a verdict per ticker (buy/sell/stay put). Never touches a broker. The user executes manually in GBM.
 - **`analyze` / `check-confirmations` (dormant "phase 2")**: full order-execution path targeting **Interactive Brokers** (not GBM — GBM has no official API; see README.md "Phase 2"). Built and tested, but not what `daily-digest` uses. Real money is never touched without an explicit `TRADING_MODE=live` change; everything defaults to IBKR's paper account.
@@ -67,6 +67,11 @@ Plain SQLite (stdlib `sqlite3`, no ORM) tracking order lifecycle: `pending → c
 
 ### Notifications (`src/notifications/telegram.py`)
 Always send via `notify_safely(notifier, text)`, never `notifier.send_message()` directly, outside of `notify_safely`'s own implementation. A Telegram failure (outage, or an unescaped `_`/`*` from LLM-generated text breaking Markdown parsing) must never propagate into the code that just recorded a correct order status — `notify_safely` swallows and logs instead of raising, precisely so a notification failure can't get misread by a surrounding `except` as an execution failure.
+
+### LLM provider (`src/agent/financial_agent.py` `get_llm()`)
+Selected by `LLM_PROVIDER`: `ollama` (default — local `ChatOllama`, no key) or `openrouter` (`ChatOpenAI` pointed at OpenRouter). Both go through the same `SYSTEM_PROMPT` + `PydanticOutputParser` chain. The Ollama client is built with `format="json"` (model can only emit valid JSON — the main local-model failure mode is prose/fences around the JSON) and `reasoning=False` (thinking models like qwen3 would otherwise burn the token budget and latency on a reasoning trace the digest never shows). `OPENROUTER_API_KEY` is only required when the provider is `openrouter`. If you add a provider, add it to `get_llm()` and to the `LLM_PROVIDER` validation in `load_config()` — nothing else should know which provider is active.
+
+Per-ticker latency differs a lot between providers (a local 9B model: ~30–60s including a cold model load; hosted: a few seconds), which is why `ANALYSIS_TIMEOUT_SECONDS` is a config value (default 180) rather than a constant.
 
 ### Config (`src/config.py`)
 Single `load_config()` entry point reading `.env` into a frozen `Config` dataclass, with validation that fails fast (e.g. refuses to start if `TRADING_MODE=live` is paired with the paper-trading IBKR port). All new tunables should go through this, not scattered `os.getenv()` calls.

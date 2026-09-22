@@ -1,5 +1,7 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+import requests
+from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
@@ -42,17 +44,76 @@ RISK MANAGEMENT RULES (STRICT)
 - Never hallucinate financial data. If data is missing (e.g. 'N/A'), explicitly state it and prefer 'no action'.
 """
 
+MAX_OUTPUT_TOKENS = 1000
+TEMPERATURE = 0.1  # low for consistent, non-creative analysis
+LLM_TIMEOUT_MARGIN_SECONDS = 20
+LLM_TIMEOUT_FLOOR_SECONDS = 30
+
+
+def llm_timeout_seconds(config: Config) -> int:
+    """Client-level timeout for the LLM call, deliberately *shorter* than
+    the per-ticker thread timeout in src/pipeline.py.
+
+    The thread timeout only stops *waiting*; it can't cancel the request.
+    The HTTP client timeout, firing first, closes the connection - and
+    Ollama aborts generation when its client disconnects, which frees the
+    (single, shared) local GPU for the next ticker. If the two timeouts
+    were equal the client one would never fire, and one slow ticker's
+    orphaned generation would cascade into timeouts for the whole
+    watchlist.
+    """
+    return max(LLM_TIMEOUT_FLOOR_SECONDS, config.analysis_timeout_seconds - LLM_TIMEOUT_MARGIN_SECONDS)
+
+
+def llm_unreachable_reason(config: Config) -> Optional[str]:
+    """Cheap preflight for the local provider. Returns a human-readable
+    reason if the LLM can't be reached, else None.
+
+    Ollama is a locally-running app that may simply not be open (e.g. at
+    7 AM after a reboot). Without this check, that shows up as every
+    ticker in the digest failing with the same obscure connection error
+    instead of one clear, actionable message. Hosted providers are not
+    checked - a failure there surfaces per ticker and is not a "you
+    forgot to start something" situation.
+    """
+    if config.llm_provider != "ollama":
+        return None
+    try:
+        requests.get(f"{config.ollama_base_url}/api/tags", timeout=5).raise_for_status()
+    except requests.RequestException as e:
+        return (
+            f"Ollama is not reachable at {config.ollama_base_url} ({e.__class__.__name__}). "
+            f"Is the Ollama app / `ollama serve` running? Or set LLM_PROVIDER=openrouter."
+        )
+    return None
+
+
 def get_llm(config: Config):
-    # We use ChatOpenAI connected to OpenRouter for Anthropic models.
-    # timeout bounds a hung request at the source, rather than relying solely
-    # on the caller-side thread timeout in src/pipeline.py's daily digest.
+    """Selected by LLM_PROVIDER."""
+    timeout = llm_timeout_seconds(config)
+    if config.llm_provider == "ollama":
+        return ChatOllama(
+            model=config.ollama_model,
+            base_url=config.ollama_base_url,
+            temperature=TEMPERATURE,
+            num_predict=MAX_OUTPUT_TOKENS,
+            # JSON mode: the model can only emit valid JSON, which is exactly
+            # what PydanticOutputParser needs and removes the most common
+            # local-model failure (markdown fences / prose around the JSON).
+            format="json",
+            # Thinking models (e.g. qwen3) would otherwise spend their token
+            # budget on reasoning traces; the digest needs the structured
+            # answer within a bounded latency, not a visible chain of thought.
+            reasoning=False,
+            client_kwargs={"timeout": timeout},
+        )
     return ChatOpenAI(
         model=config.openrouter_model,
         openai_api_key=config.openrouter_api_key,
         openai_api_base="https://openrouter.ai/api/v1",
-        max_tokens=1000,
-        temperature=0.1, # Low temperature for accurate analysis
-        timeout=60,
+        max_tokens=MAX_OUTPUT_TOKENS,
+        temperature=TEMPERATURE,
+        timeout=timeout,
     )
 
 def analyze_asset(ticker: str, config: Config) -> AnalysisResult:

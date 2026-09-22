@@ -5,6 +5,7 @@ description = "AI-powered financial analysis agent with risk-managed order execu
 requires-python = ">=3.10"
 dependencies = [
     "langchain-core>=1.2",
+    "langchain-ollama>=1.0",
     "langchain-openai>=1.1",
     "yfinance>=1.2",
     "pandas>=2.2",

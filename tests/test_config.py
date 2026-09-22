@@ -48,12 +48,52 @@ def test_confirmations_client_id_defaults_to_client_id_plus_one(monkeypatch):
     assert config.ibkr_client_id_confirmations == 6
 
 
-def test_missing_openrouter_key_raises(monkeypatch):
+def test_openrouter_provider_requires_api_key(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
         load_config()
+
+
+def test_ollama_provider_does_not_require_openrouter_key(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    config = load_config()
+    assert config.llm_provider == "ollama"
+
+
+def test_llm_provider_defaults_to_ollama(monkeypatch):
+    set_env(monkeypatch)
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    config = load_config()
+    assert config.llm_provider == "ollama"
+
+
+def test_invalid_llm_provider_raises(monkeypatch):
+    set_env(monkeypatch, LLM_PROVIDER="gpt4all")
+    with pytest.raises(ValueError, match="LLM_PROVIDER"):
+        load_config()
+
+
+def test_ollama_defaults(monkeypatch):
+    set_env(monkeypatch, LLM_PROVIDER="ollama")
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("ANALYSIS_TIMEOUT_SECONDS", raising=False)
+    config = load_config()
+    assert config.ollama_model == "qwen3.5:9b"
+    assert config.ollama_base_url == "http://localhost:11434"
+    assert config.analysis_timeout_seconds == 180
+
+
+def test_analysis_timeout_is_configurable(monkeypatch):
+    set_env(monkeypatch, ANALYSIS_TIMEOUT_SECONDS="45")
+    config = load_config()
+    assert config.analysis_timeout_seconds == 45
 
 
 def test_missing_telegram_config_raises(monkeypatch):

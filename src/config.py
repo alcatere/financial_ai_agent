@@ -7,13 +7,17 @@ load_dotenv()
 
 PAPER_PORT = 4002
 LIVE_PORT = 4001
-DEFAULT_WATCHLIST = ["AAPL", "MSFT", "WALMEX.MX", "GFNORTEO.MX", "AMXL.MX"]
+DEFAULT_WATCHLIST = ["AAPL", "MSFT", "WALMEX.MX", "GFNORTEO.MX", "AMXB.MX"]
 
 
 @dataclass(frozen=True)
 class Config:
+    llm_provider: str
     openrouter_api_key: str
     openrouter_model: str
+    ollama_model: str
+    ollama_base_url: str
+    analysis_timeout_seconds: int
     trading_mode: str
     execution_mode: str
     ibkr_host: str
@@ -39,6 +43,10 @@ class Config:
 
 
 def load_config() -> Config:
+    llm_provider = os.getenv("LLM_PROVIDER", "ollama").lower()
+    if llm_provider not in ("ollama", "openrouter"):
+        raise ValueError("LLM_PROVIDER must be 'ollama' or 'openrouter'")
+
     trading_mode = os.getenv("TRADING_MODE", "paper").lower()
     if trading_mode not in ("paper", "live"):
         raise ValueError("TRADING_MODE must be 'paper' or 'live'")
@@ -58,8 +66,15 @@ def load_config() -> Config:
     watchlist = parsed_watchlist if parsed_watchlist else list(DEFAULT_WATCHLIST)
 
     config = Config(
+        llm_provider=llm_provider,
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
         openrouter_model=os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet"),
+        ollama_model=os.getenv("OLLAMA_MODEL", "qwen3.5:9b"),
+        ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        # Local models can take well over a minute per ticker (cold model load
+        # on the first call, then 1000-token generation on consumer hardware),
+        # so the default is far more generous than a hosted API would need.
+        analysis_timeout_seconds=int(os.getenv("ANALYSIS_TIMEOUT_SECONDS", "180")),
         trading_mode=trading_mode,
         execution_mode=execution_mode,
         ibkr_host=os.getenv("IBKR_HOST", "127.0.0.1"),
@@ -78,8 +93,8 @@ def load_config() -> Config:
         watchlist=watchlist,
     )
 
-    if not config.openrouter_api_key:
-        raise ValueError("OPENROUTER_API_KEY environment variable not set")
+    if config.llm_provider == "openrouter" and not config.openrouter_api_key:
+        raise ValueError("LLM_PROVIDER=openrouter requires OPENROUTER_API_KEY to be set")
     if not (config.telegram_bot_token and config.telegram_chat_id):
         raise ValueError(
             "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set: the agent reports "

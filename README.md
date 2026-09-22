@@ -6,13 +6,13 @@ An AI-powered financial analysis agent that turns fundamental, technical, and se
 
 ## Features
 - **Data Retrieval Tools**: real-time price trends, volumes, P/E ratios, earnings growth, and recent news via `yfinance` — works for both US tickers (`AAPL`) and BMV/Mexican tickers (`WALMEX.MX`), so your watchlist can mix what you actually trade on GBM with anything else.
-- **Intelligent Analysis**: ReAct-style processing powered by OpenRouter (Anthropic models) and LangChain, output forced into a strict Pydantic schema.
+- **Intelligent Analysis**: LangChain-orchestrated analysis with output forced into a strict Pydantic schema. Runs against a **local Ollama model by default** (free, private, no API key) or a hosted model via OpenRouter — switchable with one env var.
 - **Deterministic Risk Manager** (`src/risk/risk_manager.py`): re-checks the LLM's output in plain Python before it's ever reported as an actionable signal — confidence ≥ 70% and no missing/errored data. This runs regardless of what the LLM claims.
 - **Daily digest via Telegram**: one message a day, one line per watchlist ticker, so a quiet day still confirms the system is alive.
 
 ## Tech Stack
 - **Python 3.10+**
-- **LangChain** (orchestration & prompts) + **OpenRouter/Anthropic** (LLM)
+- **LangChain** (orchestration & prompts) + **Ollama** (local LLM, default) or **OpenRouter** (hosted LLM)
 - **YFinance & Pandas** (market/fundamental data)
 - **Pydantic** (strict output schema)
 - **Telegram Bot API** (notifications, via `requests`)
@@ -28,9 +28,15 @@ An AI-powered financial analysis agent that turns fundamental, technical, and se
    pip install -e .
    ```
 
-2. **Create a Telegram bot**: message [@BotFather](https://t.me/BotFather) to get a `TELEGRAM_BOT_TOKEN`, send your bot any message, then call `https://api.telegram.org/bot<TOKEN>/getUpdates` to find your `TELEGRAM_CHAT_ID`.
+2. **Pick an LLM provider** (`LLM_PROVIDER` in `.env`):
+   - **`ollama`** (default): install [Ollama](https://ollama.com), pull a model (`ollama pull qwen3.5:9b`), and make sure the Ollama app/`ollama serve` is running — including at 7 AM when the scheduled job fires. Free, private, no API key. Set `OLLAMA_MODEL` to whatever `ollama list` shows.
+   - **`openrouter`**: hosted models; requires `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`. Faster and stronger than a local 9B model, but costs per call.
 
-3. **Configure `.env`**: at minimum set `OPENROUTER_API_KEY`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`. Set `WATCHLIST` to the tickers you want analyzed daily (comma-separated, e.g. `AAPL,MSFT,WALMEX.MX,GFNORTEO.MX,AMXL.MX`) — mix BMV (`.MX`) and US tickers freely.
+   Both settings stay in `.env` side by side, so switching is a one-line change.
+
+3. **Create a Telegram bot**: message [@BotFather](https://t.me/BotFather) to get a `TELEGRAM_BOT_TOKEN`, send your bot any message, then call `https://api.telegram.org/bot<TOKEN>/getUpdates` to find your `TELEGRAM_CHAT_ID`. Use a bot dedicated to this project — a bot shared with another app that also polls `getUpdates` will fight it for messages.
+
+4. **Configure `.env`**: set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, plus whatever your chosen provider needs from step 2. Set `WATCHLIST` to the tickers you want analyzed daily (comma-separated, e.g. `AAPL,MSFT,WALMEX.MX,GFNORTEO.MX,AMXB.MX`) — mix BMV (`.MX`) and US tickers freely. `ANALYSIS_TIMEOUT_SECONDS` (default 180) caps how long a single ticker may take; local models need the headroom, hosted ones can go lower.
 
 ## Usage
 
@@ -46,7 +52,7 @@ Resumen diario — 2026-09-18
 🟢 AAPL: COMPRA (confianza 85%). Strong earnings growth and expanding margins.
 ➡️ WALMEX.MX: mantente, está estable. Revenue growth in line with expectations.
 🔴 GFNORTEO.MX: VENDE (confianza 78%). Deteriorating credit metrics.
-➡️ AMXL.MX: sin acción clara (Confidence 55% is below the 70% minimum required to execute.)
+➡️ AMXB.MX: sin acción clara (Confidence 55% is below the 70% minimum required to execute.)
 ```
 
 ### Running it automatically, once a day (macOS `launchd`)
