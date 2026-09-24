@@ -18,6 +18,13 @@ def cmd_check_confirmations(args):
     run_check_confirmations(config)
 
 
+def cmd_daily_digest(args):
+    from src.pipeline import run_daily_digest
+    config = load_config()
+    print(f"--- Running daily advisory digest for {len(config.watchlist)} ticker(s) ---")
+    run_daily_digest(config)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Financial AI Agent CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -28,6 +35,9 @@ def main():
 
     check_parser = subparsers.add_parser("check-confirmations", help="Poll Telegram for order confirmations and execute them")
     check_parser.set_defaults(func=cmd_check_confirmations)
+
+    digest_parser = subparsers.add_parser("daily-digest", help="Advisory-only: analyze the watchlist and send one Telegram digest")
+    digest_parser.set_defaults(func=cmd_daily_digest)
 
     args = parser.parse_args()
 

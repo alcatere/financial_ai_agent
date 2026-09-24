@@ -3,7 +3,7 @@ from typing import List
 
 from src.broker.base import Broker
 from src.models.schemas import FinancialRecommendation
-from src.notifications.telegram import TelegramNotifier, notify_safely
+from src.notifications.telegram import TelegramNotifier, escape_markdown, notify_safely
 from src.orders.store import EXECUTED, EXECUTION_FAILED, OrderStore, status_for_fill
 
 
@@ -27,13 +27,22 @@ class Confirmer(ABC):
 
     @staticmethod
     def _rationale_block(recommendation: FinancialRecommendation) -> str:
+        # All of this is LLM-generated free text - escape it before it goes
+        # into a Markdown-formatted Telegram message, or a stray '_'/'*' in
+        # the model's own wording breaks the send entirely.
         r = recommendation.rationale
         return (
-            f"Technical: {r.technical_factors}\n"
-            f"Fundamental: {r.fundamental_factors}\n"
-            f"Sentiment: {r.sentiment_factors}\n"
-            f"Risks: {recommendation.risks}"
+            f"Technical: {escape_markdown(r.technical_factors)}\n"
+            f"Fundamental: {escape_markdown(r.fundamental_factors)}\n"
+            f"Sentiment: {escape_markdown(r.sentiment_factors)}\n"
+            f"Risks: {escape_markdown(recommendation.risks)}"
         )
+
+    @staticmethod
+    def _risk_notes(risk_reasons: List[str]) -> str:
+        if not risk_reasons:
+            return ""
+        return f"\nRisk notes: {escape_markdown('; '.join(risk_reasons))}"
 
 
 class HumanConfirmer(Confirmer):
@@ -50,14 +59,15 @@ class HumanConfirmer(Confirmer):
         risk_reasons: List[str],
     ) -> None:
         side = recommendation.recommendation
+        ticker_display = escape_markdown(ticker)
         order = self.store.create_pending(
             ticker, side, quantity, allocation_pct, recommendation.confidence,
             reasons="; ".join(risk_reasons),
         )
-        risk_notes = f"\nRisk notes: {'; '.join(risk_reasons)}" if risk_reasons else ""
+        risk_notes = self._risk_notes(risk_reasons)
         message = (
             f"*Proposed order #{order.id}*\n"
-            f"{side} {quantity} {ticker}\n"
+            f"{side} {quantity} {ticker_display}\n"
             f"Allocation: {allocation_pct:.2f}%  |  Confidence: {recommendation.confidence}%\n\n"
             f"{self._rationale_block(recommendation)}"
             f"{risk_notes}\n\n"
@@ -86,11 +96,12 @@ class AutonomousConfirmer(Confirmer):
         risk_reasons: List[str],
     ) -> None:
         side = recommendation.recommendation
+        ticker_display = escape_markdown(ticker)
         order = self.store.create_pending(
             ticker, side, quantity, allocation_pct, recommendation.confidence,
             reasons="; ".join(risk_reasons),
         )
-        risk_notes = f"\nRisk notes: {'; '.join(risk_reasons)}" if risk_reasons else ""
+        risk_notes = self._risk_notes(risk_reasons)
 
         # connect() and place_order() share one try/except: a Gateway that's
         # down or unreachable must fail the order the same way a broker-side
@@ -106,7 +117,7 @@ class AutonomousConfirmer(Confirmer):
             notify_safely(
                 self.notifier,
                 f"*Order #{order.id} failed to execute autonomously*\n"
-                f"{side} {quantity} {ticker}\nError: {e}",
+                f"{side} {quantity} {ticker_display}\nError: {escape_markdown(str(e))}",
             )
             return
 
@@ -116,7 +127,7 @@ class AutonomousConfirmer(Confirmer):
         notify_safely(
             self.notifier,
             f"*Order #{order.id} {label} autonomously*\n"
-            f"{side} {quantity} {ticker}\n"
+            f"{side} {quantity} {ticker_display}\n"
             f"Broker status: {result.status} (filled {result.filled_quantity})\n\n"
             f"{self._rationale_block(recommendation)}"
             f"{risk_notes}",
