@@ -106,6 +106,12 @@ def get_llm(config: Config):
             # answer within a bounded latency, not a visible chain of thought.
             reasoning=False,
             client_kwargs={"timeout": timeout},
+        ).bind(
+            # ChatOllama streams by default, and with streaming the httpx
+            # timeout is a per-chunk *read* timeout: a slow but steady
+            # generation would never trip it. Non-streaming, Ollama sends
+            # nothing until it's done, so the timeout bounds the whole call.
+            stream=False,
         )
     return ChatOpenAI(
         model=config.openrouter_model,

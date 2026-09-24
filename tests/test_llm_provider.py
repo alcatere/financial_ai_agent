@@ -19,7 +19,11 @@ def _config(monkeypatch, **overrides):
 
 def test_ollama_provider_builds_chat_ollama(monkeypatch):
     config = _config(monkeypatch, LLM_PROVIDER="ollama", OLLAMA_MODEL="qwen3.5:9b", OLLAMA_BASE_URL="http://localhost:11434")
-    llm = get_llm(config)
+    binding = get_llm(config)
+    # Non-streaming, so the client timeout bounds the whole generation
+    # rather than just the gap between streamed chunks.
+    assert binding.kwargs == {"stream": False}
+    llm = binding.bound
     assert isinstance(llm, ChatOllama)
     assert llm.model == "qwen3.5:9b"
     assert llm.base_url == "http://localhost:11434"
@@ -49,7 +53,7 @@ def test_llm_timeout_has_a_floor(monkeypatch):
 
 def test_ollama_client_timeout_uses_derived_value(monkeypatch):
     config = _config(monkeypatch, LLM_PROVIDER="ollama", ANALYSIS_TIMEOUT_SECONDS="100")
-    llm = get_llm(config)
+    llm = get_llm(config).bound
     assert llm.client_kwargs["timeout"] == 80
 
 
